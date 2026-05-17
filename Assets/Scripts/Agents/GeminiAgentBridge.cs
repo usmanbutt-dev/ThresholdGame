@@ -120,6 +120,52 @@ namespace Threshold.Agents
         /// <summary>Number of calls rejected by rate limiter this session.</summary>
         public int RateLimitRejections => _rateLimitRejections;
 
+        /// <summary>Read-only access to the full trace log this session.</summary>
+        public IReadOnlyList<AgentTraceEntry> TraceLog => _traceLog;
+
+        /// <summary>Get the most recent trace for a specific agent.</summary>
+        public AgentTraceEntry GetLastTrace(string agentName)
+        {
+            return _lastTraceByAgent.TryGetValue(agentName, out var entry) ? entry : null;
+        }
+
+        /// <summary>Get the most recent trace for each agent (for debug panel).</summary>
+        public Dictionary<string, AgentTraceEntry> GetLatestTracePerAgent()
+        {
+            return new Dictionary<string, AgentTraceEntry>(_lastTraceByAgent);
+        }
+
+        /// <summary>
+        /// Exports all session traces to a timestamped JSON file.
+        /// Returns the file path on success, or null on failure.
+        /// </summary>
+        public string ExportTraces()
+        {
+            try
+            {
+                var export = new AgentTraceExport
+                {
+                    exportTimestamp = DateTime.UtcNow.ToString("o"),
+                    totalCalls = _traceLog.Count,
+                    successfulCalls = _traceLog.Count(e => e.success),
+                    failedCalls = _traceLog.Count(e => !e.success),
+                    entries = new List<AgentTraceEntry>(_traceLog)
+                };
+
+                string fileName = $"threshold_traces_{DateTime.Now:yyyyMMdd_HHmmss}.json";
+                string path = System.IO.Path.Combine(Application.persistentDataPath, fileName);
+                System.IO.File.WriteAllText(path, JsonUtility.ToJson(export, true));
+
+                Debug.Log($"[GeminiAgentBridge] Exported {export.totalCalls} traces → {path}");
+                return path;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[GeminiAgentBridge] Export failed: {ex.Message}");
+                return null;
+            }
+        }
+
         // ====================================================================
         // System prompt suffix appended to every agent call to enforce trace format.
         // ====================================================================
@@ -298,61 +344,7 @@ All 5 fields are mandatory and must be non-empty strings.";
             }
         }
 
-        /// <summary>
-        /// Returns the most recent trace entry for a given agent.
-        /// Used by the in-game debug panel.
-        /// </summary>
-        public AgentTraceEntry GetLastTrace(string agentName)
-        {
-            _lastTraceByAgent.TryGetValue(agentName, out var entry);
-            return entry;
-        }
 
-        /// <summary>
-        /// Returns all stored trace entries, optionally filtered by agent name.
-        /// </summary>
-        public List<AgentTraceEntry> GetTraces(string agentName = null)
-        {
-            if (string.IsNullOrEmpty(agentName))
-                return new List<AgentTraceEntry>(_traceLog);
-
-            return _traceLog.Where(e => e.agentName == agentName).ToList();
-        }
-
-        /// <summary>
-        /// Exports all logged traces to a JSON file for hackathon submission.
-        /// Saves to Application.persistentDataPath/agent_traces_{timestamp}.json
-        /// Returns the full file path.
-        /// </summary>
-        public string ExportTraces()
-        {
-            var export = new AgentTraceExport
-            {
-                exportTimestamp = DateTime.UtcNow.ToString("o"),
-                totalCalls = _traceLog.Count,
-                successfulCalls = SuccessfulCalls,
-                failedCalls = FailedCalls,
-                entries = new List<AgentTraceEntry>(_traceLog)
-            };
-
-            string json = JsonUtility.ToJson(export, true);
-            string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            string fileName = $"agent_traces_{timestamp}.json";
-            string filePath = System.IO.Path.Combine(Application.persistentDataPath, fileName);
-
-            try
-            {
-                System.IO.File.WriteAllText(filePath, json);
-                Debug.Log($"[GeminiAgentBridge] Traces exported to: {filePath} " +
-                         $"({_traceLog.Count} entries)");
-                return filePath;
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"[GeminiAgentBridge] Failed to export traces: {ex.Message}");
-                return null;
-            }
-        }
 
         /// <summary>
         /// Clears all stored traces. Useful between test sessions.
