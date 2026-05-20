@@ -238,8 +238,8 @@ namespace Threshold.Player
 
         private void ProcessHit(RaycastHit hitInfo)
         {
-            // Check if we hit an NPC
-            var npc = hitInfo.collider.GetComponent<NPC.NPCStateMachine>();
+            // Check if we hit an NPC (check self and parents for compound collider setups)
+            var npc = hitInfo.collider.GetComponentInParent<NPC.NPCStateMachine>();
             if (npc != null)
             {
                 // Don't damage allied NPCs

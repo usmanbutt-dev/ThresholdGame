@@ -410,6 +410,37 @@ namespace Threshold.Generation
                     string npcId = $"npc_{roomConfig.roomId}_{npcIndex}";
                     npcObj.name = npcId;
 
+                    // ── Ensure physics components exist ──────────────
+                    // Collider: needed for player's hitscan raycast to hit this NPC
+                    if (npcObj.GetComponentInChildren<Collider>() == null)
+                    {
+                        var capsule = npcObj.AddComponent<CapsuleCollider>();
+                        // Size the collider from the renderer bounds
+                        var renderers = npcObj.GetComponentsInChildren<Renderer>();
+                        if (renderers.Length > 0)
+                        {
+                            Bounds b = renderers[0].bounds;
+                            foreach (var r in renderers) b.Encapsulate(r.bounds);
+                            capsule.center = npcObj.transform.InverseTransformPoint(b.center);
+                            capsule.height = b.size.y;
+                            capsule.radius = Mathf.Max(b.extents.x, b.extents.z) * 0.5f;
+                        }
+                        else
+                        {
+                            capsule.height = 2f;
+                            capsule.center = Vector3.up;
+                            capsule.radius = 0.5f;
+                        }
+                    }
+
+                    // NavMeshAgent: required by NPCStateMachine
+                    if (npcObj.GetComponent<UnityEngine.AI.NavMeshAgent>() == null)
+                        npcObj.AddComponent<UnityEngine.AI.NavMeshAgent>();
+
+                    // Disable Animator root motion so NavMesh controls movement
+                    var anim = npcObj.GetComponentInChildren<Animator>();
+                    if (anim != null) anim.applyRootMotion = false;
+
                     var sm = npcObj.GetComponent<Threshold.NPC.NPCStateMachine>();
                     if (sm == null)
                         sm = npcObj.AddComponent<Threshold.NPC.NPCStateMachine>();

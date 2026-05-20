@@ -8,6 +8,7 @@
 // ============================================================================
 
 using System;
+using System.Collections;
 using Threshold.Core;
 using UnityEngine;
 using UnityEngine.AI;
@@ -136,6 +137,20 @@ namespace Threshold.NPC
         [Tooltip("Cover points available to this NPC (assigned by room).")]
         public Transform[] coverPoints;
 
+        [Header("Auto-Engage")]
+        [Tooltip("If true, NPCs in PATROL auto-switch to ATTACK when player is within range and visible.")]
+        [SerializeField] private bool autoEngageOnSight = true;
+
+        [Tooltip("Max distance to auto-detect and engage the player.")]
+        [SerializeField] private float autoEngageRange = 15f;
+
+        [Header("Visuals")]
+        [Tooltip("Animator component on this NPC (or child). Auto-found if null.")]
+        [SerializeField] private Animator animator;
+
+        [Tooltip("Tracer color for NPC shots.")]
+        [SerializeField] private Color npcTracerColor = new Color(1f, 0.15f, 0.1f, 0.9f);
+
         [Header("Defection VFX")]
         [Tooltip("Visual effect to play when NPC defects to ALLIED.")]
         public GameObject defectionVFX;
@@ -178,6 +193,8 @@ namespace Threshold.NPC
         private void Awake()
         {
             _agent = GetComponent<NavMeshAgent>();
+            if (animator == null)
+                animator = GetComponentInChildren<Animator>();
         }
 
         /// <summary>
@@ -205,6 +222,7 @@ namespace Threshold.NPC
             if (IsDead) return;
 
             UpdateSensors();
+            UpdateAnimator();
 
             switch (CurrentState)
             {
@@ -355,6 +373,14 @@ namespace Threshold.NPC
 
         private void UpdatePatrol()
         {
+            // Auto-engage: switch to ATTACK when player is visible and in range
+            if (autoEngageOnSight && _playerTarget != null &&
+                _distanceToPlayer <= autoEngageRange && _hasLineOfSight)
+            {
+                SetState(NPCState.ATTACK);
+                return;
+            }
+
             // M3 FIX: Random wander if no waypoints assigned
             if (patrolWaypoints == null || patrolWaypoints.Length == 0)
             {
@@ -377,11 +403,21 @@ namespace Threshold.NPC
         {
             if (_playerTarget == null) return;
 
+            // Disengage: return to patrol if player is out of range or no LOS for too long
+            if (_distanceToPlayer > engagementRange * 1.5f ||
+                (!_hasLineOfSight && TimeSinceStateChange > 5f))
+            {
+                SetState(NPCState.PATROL);
+                return;
+            }
+
             // Face and slowly advance toward player
             FaceTarget(_playerTarget.position);
 
-            if (_distanceToPlayer > engagementRange * 0.5f)
+            if (_distanceToPlayer > engagementRange * 0.5f && _hasLineOfSight)
                 _agent.SetDestination(_playerTarget.position);
+            else if (!_hasLineOfSight)
+                _agent.isStopped = true; // Don't path through walls
             else
                 _agent.isStopped = true;
 
@@ -471,12 +507,25 @@ namespace Threshold.NPC
 
             _distanceToPlayer = Vector3.Distance(transform.position, _playerTarget.position);
 
-            // Line of sight check
+            // Line of sight check — cast against everything except triggers
+            // This ensures room walls (on any layer) properly block sight
             Vector3 origin = muzzlePoint != null ? muzzlePoint.position : transform.position + Vector3.up;
             Vector3 dir = (_playerTarget.position + Vector3.up) - origin;
 
-            _hasLineOfSight = !Physics.Raycast(origin, dir.normalized, dir.magnitude,
-                LayerMask.GetMask("Environment", "Cover"));
+            // Use default raycast (all layers) — if we hit something that ISN'T the player,
+            // we don't have line of sight
+            if (Physics.Raycast(origin, dir.normalized, out RaycastHit losHit, dir.magnitude,
+                Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+            {
+                // Check if the thing we hit is the player (or player's child)
+                _hasLineOfSight = losHit.collider.CompareTag("Player") ||
+                    losHit.collider.GetComponentInParent<Threshold.Player.PlayerHealth>() != null;
+            }
+            else
+            {
+                // Nothing in the way
+                _hasLineOfSight = true;
+            }
         }
 
         // ====================================================================
@@ -486,6 +535,7 @@ namespace Threshold.NPC
         private void TryFire(Vector3 targetPos)
         {
             if (_currentFireRate <= 0f) return;
+            if (!_hasLineOfSight) return; // Can't fire through walls
 
             float interval = 1f / _currentFireRate;
             if (Time.time - _lastFireTime < interval) return;
@@ -511,8 +561,12 @@ namespace Threshold.NPC
                 );
             }
 
+            Vector3 endPoint = origin + dir.normalized * engagementRange;
+
             if (Physics.Raycast(origin, dir.normalized, out RaycastHit hitInfo, engagementRange))
             {
+                endPoint = hitInfo.point;
+
                 // Apply damage to player via PlayerHealth
                 var playerHealth = hitInfo.collider.GetComponent<Threshold.Player.PlayerHealth>();
                 if (playerHealth != null)
@@ -520,6 +574,9 @@ namespace Threshold.NPC
                     playerHealth.TakeDamage(Stats.damage);
                 }
             }
+
+            // Spawn red laser tracer
+            Threshold.Player.ProjectileTracer.Spawn(origin, endPoint, npcTracerColor);
         }
 
         // ====================================================================
@@ -693,17 +750,70 @@ namespace Threshold.NPC
 
         private void OnDeath()
         {
-            _agent.isStopped = true;
-            _agent.enabled = false;
+            // Stop NavMeshAgent immediately
+            if (_agent != null && _agent.isOnNavMesh)
+                _agent.isStopped = true;
+            if (_agent != null)
+                _agent.enabled = false;
 
-            // Disable collider so raycasts pass through dead NPCs
-            var col = GetComponent<Collider>();
-            if (col != null) col.enabled = false;
+            // Disable ALL colliders so raycasts pass through corpse
+            foreach (var col in GetComponentsInChildren<Collider>())
+                col.enabled = false;
 
-            // Stop the state machine tick
-            SetState(NPCState.DEAD);
+            // Stop animator
+            if (animator != null)
+                animator.enabled = false;
 
-            // TODO: Play death animation, schedule cleanup/despawn
+            if (logStateChanges)
+                Debug.Log($"[NPC {npcId}] DEAD");
+
+            // Play death sequence then destroy
+            StartCoroutine(DeathSequence());
+        }
+
+        private IEnumerator DeathSequence()
+        {
+            float duration = 0.6f;
+            float elapsed = 0f;
+            Vector3 startScale = transform.localScale;
+            Vector3 startPos = transform.position;
+
+            // Tint all renderers dark
+            var renderers = GetComponentsInChildren<Renderer>();
+            MaterialPropertyBlock mpb = new();
+            mpb.SetColor("_Color", new Color(0.15f, 0.05f, 0.05f, 1f));
+            foreach (var r in renderers)
+                r.SetPropertyBlock(mpb);
+
+            // Shrink + sink
+            while (elapsed < duration)
+            {
+                float t = elapsed / duration;
+                transform.localScale = Vector3.Lerp(startScale, Vector3.zero, t * t);
+                transform.position = startPos + Vector3.down * (t * 0.5f);
+                elapsed += Time.deltaTime;
+                yield return null;
+            }
+
+            Destroy(gameObject);
+        }
+
+        // ====================================================================
+        // Animator Sync
+        // ====================================================================
+
+        /// <summary>
+        /// Drives animator parameters from NavMeshAgent velocity.
+        /// Works with the RoboCop controller (Walk_Anim bool).
+        /// </summary>
+        private void UpdateAnimator()
+        {
+            if (animator == null) return;
+
+            // Walk_Anim = true when moving
+            bool isMoving = _agent != null && _agent.enabled &&
+                            _agent.velocity.sqrMagnitude > 0.1f;
+            animator.SetBool("Walk_Anim", isMoving);
         }
 
         // ====================================================================

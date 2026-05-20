@@ -190,7 +190,20 @@ namespace Threshold.UI
 
         private void LateUpdate()
         {
-            if (target == null) return;
+            // Auto-recover: find player if target was lost or not yet spawned
+            if (target == null)
+            {
+                var playerObj = GameObject.FindGameObjectWithTag("Player");
+                if (playerObj != null)
+                {
+                    SetTarget(playerObj.transform);
+                    Debug.Log("[TopDownCamera] Auto-found player target.");
+                }
+                else
+                {
+                    return;
+                }
+            }
 
             UpdateLookAhead();
             UpdateZoom();
