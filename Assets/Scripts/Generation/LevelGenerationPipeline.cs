@@ -148,11 +148,40 @@ namespace Threshold.Generation
                         continue;
                     }
 
+                    // Auto-repair doorways before validation (compensates for
+                    // Flash model's weak spatial reasoning)
+                    int repairCount = ProceduralRoomGenerator.RepairDoorways(lgStep.config);
+
+                    // Auto-repair duplicate roles (e.g., 2 EXITs → demote extras to PACING)
+                    repairCount += RepairDuplicateRoles(lgStep.config);
+
+                    // Ensure spawnZones are initialized, then populate with enemies
+                    foreach (var room in lgStep.config.rooms)
+                    {
+                        if (room.spawnZones == null)
+                            room.spawnZones = new System.Collections.Generic.List<SpawnZoneConfig>();
+                    }
+                    ProceduralRoomGenerator.PopulateSpawnZones(lgStep.config, result.difficulty);
+
+                    if (repairCount > 0)
+                    {
+                        steps.Add(new PipelineStep
+                        {
+                            stepName = $"Auto-Repair (attempt {attempt})",
+                            source = "local",
+                            success = true,
+                            durationMs = 0,
+                            details = $"Repaired {repairCount} issue(s), populated spawn zones."
+                        });
+                    }
+
                     // Local validation first (fast, free)
                     var localIssues = ProceduralRoomGenerator.Validate(lgStep.config);
-                    if (localIssues.Count > 0)
+                    // Filter: only hard errors cause rejection (warnings are acceptable)
+                    var hardErrors = localIssues.FindAll(i => !i.StartsWith("Warning"));
+                    if (hardErrors.Count > 0)
                     {
-                        lastRejectionReason = $"Local validation: {string.Join("; ", localIssues)}";
+                        lastRejectionReason = $"Local validation: {string.Join("; ", hardErrors)}";
                         steps.Add(new PipelineStep
                         {
                             stepName = $"Local Validation (attempt {attempt})",
@@ -357,7 +386,8 @@ namespace Threshold.Generation
                     agentName: "level_gen",
                     systemPrompt: prompt,
                     gameStateJson: gameState,
-                    model: GeminiModel.Flash
+                    model: GeminiModel.Pro,   // Pro (49B) for spatial reasoning
+                    timeoutSeconds: 60        // Allow up to 60s — quality > speed
                 );
 
                 var response = await GeminiAgentBridge.Instance.SendAgentRequest(request);
@@ -472,76 +502,28 @@ namespace Threshold.Generation
         private string BuildLevelGenPrompt(DifficultyProfile difficulty, string rejection)
         {
             string base_prompt = $@"You are the LEVEL GENERATION AGENT for THRESHOLD.
-Generate a dungeon floor as a SINGLE JSON object. Output ONLY valid JSON — no explanation, no markdown fences.
+Generate a dungeon floor as a SINGLE JSON object. Output ONLY valid JSON.
 
-=== ENUM VALUES (use INTEGER values, NOT strings) ===
-RoomShape: CROSSROADS=0, T_JUNCTION=1, STRAIGHT=2, CORNER=3, DEAD_END=4
-RoomRole:  ENTRY=0, EXIT=1, PACING=2, COMBAT=3, AMBUSH=4, BOSS=5, LOOT=6, CHOKE=7
-Direction: NORTH=0, EAST=1, SOUTH=2, WEST=3
-NPCArchetype: GRUNT=0, FLANKER=1, SUPPRESSOR=2, ELITE=3
+ENUMS (use INTEGER values): RoomShape: CROSSROADS=0,T_JUNCTION=1,STRAIGHT=2,CORNER=3,DEAD_END=4
+RoomRole: ENTRY=0,EXIT=1,PACING=2,COMBAT=3,AMBUSH=4,BOSS=5,LOOT=6,CHOKE=7
+Direction: NORTH=0,EAST=1,SOUTH=2,WEST=3 | NPCArchetype: GRUNT=0,FLANKER=1,SUPPRESSOR=2,ELITE=3
 
-=== DOORWAY RULES BY SHAPE ===
-CROSSROADS(0): 4 doorways — N,E,S,W all open
-T_JUNCTION(1): 3 doorways — pick any 3
-STRAIGHT(2):   2 doorways — opposite sides (N+S or E+W)
-CORNER(3):     2 doorways — adjacent sides (N+E, E+S, S+W, W+N)
-DEAD_END(4):   1 doorway only
+DOORWAYS BY SHAPE: CROSSROADS=4(N,E,S,W) T_JUNCTION=3(any 3) STRAIGHT=2(opposite) CORNER=2(adjacent) DEAD_END=1
 
-=== STRICT VALIDATION RULES ===
-1. Exactly 1 room with role=0 (ENTRY), exactly 1 room with role=1 (EXIT)
-2. ENTRY and EXIT rooms must have EMPTY spawnZones (no enemies)
-3. Every edge must have matching doorways: if edge says roomA->roomB via direction D, roomA must have doorway D open, and roomB must have the OPPOSITE doorway open (NORTH<->SOUTH, EAST<->WEST)
-4. ALL rooms must be reachable from ENTRY via edges (BFS connectivity)
-5. Each room's doorway count must match its shape
-6. Rooms on a grid — use gridCol/gridRow. Adjacent rooms connected NORTH are at (col, row) and (col, row-1). EAST: (col, row) and (col+1, row).
+RULES: 1)Exactly 1 ENTRY(role=0), 1 EXIT(role=1) 2)ENTRY/EXIT have empty spawnZones
+3)Matching doorways: if edge roomA→roomB dir D, roomA has D open, roomB has opposite open (N↔S,E↔W)
+4)All rooms reachable from ENTRY via BFS 5)Doorway count matches shape 6)Grid coords: NORTH=(col,row-1) EAST=(col+1,row)
 
-=== DIFFICULTY PROFILE ===
-targetRoomCount: {difficulty.targetRoomCount}
-difficultyMultiplier: {difficulty.difficultyMultiplier:F1}
-baseEnemiesPerRoom: {difficulty.baseEnemiesPerRoom}
-eliteCount: {difficulty.eliteCount}
+DIFFICULTY: rooms={difficulty.targetRoomCount}, multiplier={difficulty.difficultyMultiplier:F1}, enemies/room={difficulty.baseEnemiesPerRoom}, elites={difficulty.eliteCount}
 
-=== EXAMPLE (5-room linear dungeon) ===
-{{
-  ""rooms"": [
-    {{
-      ""roomId"": ""room_0"", ""gridCol"": 0, ""gridRow"": 0, ""shape"": 4, ""role"": 0, ""rotationDegrees"": 0,
-      ""doorways"": [{{""direction"": 1, ""isOpen"": true, ""connectedRoomId"": ""room_1""}}],
-      ""spawnZones"": [], ""items"": [], ""events"": []
-    }},
-    {{
-      ""roomId"": ""room_1"", ""gridCol"": 1, ""gridRow"": 0, ""shape"": 2, ""role"": 3, ""rotationDegrees"": 0,
-      ""doorways"": [{{""direction"": 3, ""isOpen"": true, ""connectedRoomId"": ""room_0""}}, {{""direction"": 1, ""isOpen"": true, ""connectedRoomId"": ""room_2""}}],
-      ""spawnZones"": [{{""localPosition"": {{""x"": 0, ""y"": 0, ""z"": 0}}, ""archetype"": 0, ""count"": 3, ""spawnDelay"": 0}}],
-      ""items"": [], ""events"": []
-    }},
-    {{
-      ""roomId"": ""room_2"", ""gridCol"": 2, ""gridRow"": 0, ""shape"": 3, ""role"": 2, ""rotationDegrees"": 0,
-      ""doorways"": [{{""direction"": 3, ""isOpen"": true, ""connectedRoomId"": ""room_1""}}, {{""direction"": 2, ""isOpen"": true, ""connectedRoomId"": ""room_3""}}],
-      ""spawnZones"": [], ""items"": [{{""itemType"": 0, ""localPosition"": {{""x"": 0, ""y"": 0, ""z"": 0}}}}], ""events"": []
-    }},
-    {{
-      ""roomId"": ""room_3"", ""gridCol"": 2, ""gridRow"": 1, ""shape"": 2, ""role"": 5, ""rotationDegrees"": 90,
-      ""doorways"": [{{""direction"": 0, ""isOpen"": true, ""connectedRoomId"": ""room_2""}}, {{""direction"": 2, ""isOpen"": true, ""connectedRoomId"": ""room_4""}}],
-      ""spawnZones"": [{{""localPosition"": {{""x"": 0, ""y"": 0, ""z"": 0}}, ""archetype"": 3, ""count"": 1, ""spawnDelay"": 0}}],
-      ""items"": [], ""events"": []
-    }},
-    {{
-      ""roomId"": ""room_4"", ""gridCol"": 2, ""gridRow"": 2, ""shape"": 4, ""role"": 1, ""rotationDegrees"": 0,
-      ""doorways"": [{{""direction"": 0, ""isOpen"": true, ""connectedRoomId"": ""room_3""}}],
-      ""spawnZones"": [], ""items"": [], ""events"": []
-    }}
-  ],
-  ""edges"": [
-    {{""roomIdA"": ""room_0"", ""roomIdB"": ""room_1"", ""directionFromA"": 1}},
-    {{""roomIdA"": ""room_1"", ""roomIdB"": ""room_2"", ""directionFromA"": 1}},
-    {{""roomIdA"": ""room_2"", ""roomIdB"": ""room_3"", ""directionFromA"": 2}},
-    {{""roomIdA"": ""room_3"", ""roomIdB"": ""room_4"", ""directionFromA"": 2}}
-  ],
-  ""metadata"": {{""seed"": 42, ""generationMethod"": ""gemini_level_gen"", ""noveltyScore"": 0.8, ""timestamp"": """", ""qcAttempts"": 0, ""gridWidth"": 3, ""gridHeight"": 3}}
-}}
+MINIMAL EXAMPLE (2 rooms):
+{{""rooms"":[
+{{""roomId"":""room_0"",""gridCol"":0,""gridRow"":0,""shape"":4,""role"":0,""rotationDegrees"":0,""doorways"":[{{""direction"":1,""isOpen"":true,""connectedRoomId"":""room_1""}}],""spawnZones"":[],""items"":[],""events"":[]}},
+{{""roomId"":""room_1"",""gridCol"":1,""gridRow"":0,""shape"":4,""role"":1,""rotationDegrees"":0,""doorways"":[{{""direction"":3,""isOpen"":true,""connectedRoomId"":""room_0""}}],""spawnZones"":[],""items"":[],""events"":[]}}
+],""edges"":[{{""roomIdA"":""room_0"",""roomIdB"":""room_1"",""directionFromA"":1}}],
+""metadata"":{{""seed"":42,""generationMethod"":""gemini_level_gen"",""noveltyScore"":0.8,""timestamp"":"""",""qcAttempts"":0,""gridWidth"":2,""gridHeight"":1}}}}
 
-NOW generate a {difficulty.targetRoomCount}-room dungeon. Use varied shapes and roles. Include branching paths, not just linear. Output ONLY the JSON.";
+Generate {difficulty.targetRoomCount} rooms with varied shapes, branching paths, combat/loot/pacing rooms. Output ONLY JSON.";
 
             if (!string.IsNullOrEmpty(rejection))
             {
@@ -553,23 +535,14 @@ NOW generate a {difficulty.targetRoomCount}-room dungeon. Use varied shapes and 
 
         private string BuildQcPrompt()
         {
-            return @"You are the QC (Quality Control) AGENT for THRESHOLD.
-You receive a RoomGraphConfig JSON and must validate it. Output ONLY JSON — no explanation.
+            return @"You are the QC AGENT for THRESHOLD. Validate a RoomGraphConfig JSON. Output ONLY JSON.
 
-=== VALIDATION CHECKS (all must pass) ===
-1. UNIQUE ROLES: Exactly 1 room with role=0 (ENTRY), exactly 1 with role=1 (EXIT)
-2. SPAWN SAFETY: ENTRY (role=0) and EXIT (role=1) must have empty spawnZones
-3. DOORWAY CONSISTENCY: For every edge, roomA must have an open doorway in directionFromA, and roomB must have the OPPOSITE direction open (0<->2, 1<->3)
-4. CONNECTIVITY: All rooms reachable from ENTRY via edges (BFS)
-5. SOLVABILITY: A path exists from ENTRY to EXIT via edges
-6. SHAPE MATCH: Each room's doorway count must match its shape (CROSSROADS=4, T_JUNCTION=3, STRAIGHT=2, CORNER=2, DEAD_END=1)
+CHECKS (all must pass): 1)Exactly 1 ENTRY(role=0), 1 EXIT(role=1) 2)ENTRY/EXIT have empty spawnZones
+3)Doorway consistency: edge roomA→roomB dir D means roomA has D open, roomB has opposite (0↔2,1↔3)
+4)All rooms reachable from ENTRY via BFS 5)Path exists ENTRY→EXIT 6)Doorway count matches shape(CROSSROADS=4,T=3,STRAIGHT=2,CORNER=2,DEAD_END=1)
 
-OUTPUT format:
-{""status"": ""ACCEPTED"", ""failures"": [], ""validation_checks"": 6, ""passed"": 6}
-or
-{""status"": ""REJECTED"", ""failures"": [""specific failure 1"", ""specific failure 2""], ""validation_checks"": 6, ""passed"": 4}
-
-If ALL checks pass, output ACCEPTED. If ANY fail, output REJECTED with specific failures.";
+OUTPUT: {""status"":""ACCEPTED"",""failures"":[],""validation_checks"":6,""passed"":6}
+or {""status"":""REJECTED"",""failures"":[""specific failure""],""validation_checks"":6,""passed"":N}";
         }
 
         // ====================================================================
@@ -664,6 +637,40 @@ If ALL checks pass, output ACCEPTED. If ANY fail, output REJECTED with specific 
         {
             if (logPipeline) Debug.Log($"[Pipeline] {status}");
             OnPipelineStatusChanged?.Invoke(status);
+        }
+
+        // ====================================================================
+        // Auto-Repair Helpers
+        // ====================================================================
+
+        /// <summary>
+        /// If the AI generated multiple ENTRY or EXIT rooms, keep the first and
+        /// demote extras to PACING. Returns the number of repairs made.
+        /// </summary>
+        private static int RepairDuplicateRoles(RoomGraphConfig config)
+        {
+            if (config?.rooms == null) return 0;
+            int repairs = 0;
+
+            bool foundEntry = false, foundExit = false;
+            foreach (var room in config.rooms)
+            {
+                if (room.role == RoomRole.ENTRY)
+                {
+                    if (foundEntry) { room.role = RoomRole.PACING; repairs++; }
+                    else foundEntry = true;
+                }
+                else if (room.role == RoomRole.EXIT)
+                {
+                    if (foundExit) { room.role = RoomRole.PACING; repairs++; }
+                    else foundExit = true;
+                }
+            }
+
+            if (repairs > 0)
+                Debug.Log($"[Pipeline] Demoted {repairs} duplicate ENTRY/EXIT room(s) to PACING.");
+
+            return repairs;
         }
 
         // ====================================================================

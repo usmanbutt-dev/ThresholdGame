@@ -487,7 +487,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalScale: {x: 3, y: 1.5, z: 3}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 6848258838292692413}
@@ -526,7 +526,7 @@ MonoBehaviour:
   doorEast: 1
   doorSouth: 1
   doorWest: 0
-  moduleWidth: 10
+  moduleWidth: 30
   spawnPoints:
   - {fileID: 5760192818556510831}
   - {fileID: 7675374881207020972}

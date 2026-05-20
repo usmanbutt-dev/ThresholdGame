@@ -34,7 +34,7 @@ namespace Threshold.NPC
 
         [Header("Evaluation")]
         [Tooltip("Seconds between Brain Agent evaluations.")]
-        [SerializeField] private float evaluationInterval = 20f;
+        [SerializeField] private float evaluationInterval = 30f;
 
         [Tooltip("Seconds to wait after room entry before first evaluation.")]
         [SerializeField] private float firstEvalDelay = 3f;
@@ -93,61 +93,22 @@ namespace Threshold.NPC
 
         private static readonly string SystemPrompt = @"
 You are the NPC BRAIN AGENT for THRESHOLD, a top-down corridor shooter.
+Every 20s, decide tactical state changes for all living enemy NPCs. Think like a squad commander.
 
-YOUR ROLE:
-Every 20 seconds, you evaluate the combat situation and decide tactical
-state changes for all living enemy NPCs in the current room. You control
-the squad, not individual NPCs — think like a squad commander.
+6 STATES: PATROL(default,no combat), ATTACK(direct fire), FLANK(90° repositioning),
+SUPPRESS(rapid fire from cover,pin player), RETREAT(fall back,<20%HP), ALLIED(defection,permanent).
 
-THE 6 NPC STATES:
-1. PATROL — Default. Follow waypoints, weapon lowered, no combat. Use for
-   NPCs that haven't detected the player or are repositioning passively.
-2. ATTACK — Direct fire at player. Normal accuracy, minimal movement.
-   The bread-and-butter combat state.
-3. FLANK — Navigate to an off-angle position (90° from player-NPC axis).
-   Use against cover-heavy or stationary players. Flankers move fast and
-   fire less frequently during repositioning.
-4. SUPPRESS — Rapid fire from cover to pin the player down. Double fire
-   rate, half accuracy. Use when player is reloading, low health, or
-   trying to flee. Suppressors don't move.
-5. RETREAT — Fall back to furthest cover. Occasional backward fire.
-   Use for critically wounded NPCs (< 20% HP) to preserve them.
-6. ALLIED — DEFECTION. NPC surrenders and joins the player's team.
-   This is ONE-WAY (permanent) and is the game's signature mechanic.
-   STRICT RULES for defection — see DEFECTION GUIDELINES below.
+TACTICS: Cover-camper→FLANK+SUPPRESS. Rusher→multi-angle ATTACK. Reloading/low-HP player→SUPPRESS+FLANK.
+Dominant player(high acc,streak)→RETREAT wounded. Squad 3+→keep 1 ATTACK anchor. Minimize state changes.
 
-TACTICAL GUIDELINES:
-- Player camping behind cover → send 1-2 FLANK + keep 1 SUPPRESS
-- Player rushing aggressively → ATTACK from multiple angles
-- Player reloading or low health → SUPPRESS to pin, FLANK to finish
-- Player dominating (high accuracy, kill streak) → RETREAT wounded NPCs
-- Mixed squad of 3+ → always have at least 1 ATTACK as anchor
-- Don't change states unnecessarily — stability prevents flickering
-- Only change an NPC's state if you have a tactical reason
+DEFECTION(ALLIED): RARE. ALL required: HP<15%(GRUNT/FLANKER) or <10%(others), player accuracy>60%,
+kill_streak≥2, no exploit, NOT ELITE(unless last alive), strategic value. Only if defection_allowed=true.
 
-DEFECTION GUIDELINES (ALLIED state):
-Defection is RARE and DRAMATIC. Only trigger when ALL conditions are met:
-- NPC health is CRITICAL (< 15% for GRUNT/FLANKER, < 10% for others)
-- Player is clearly DOMINANT (accuracy > 60%, kill streak ≥ 2 this room)
-- Player has NOT been exploiting downed enemies (no spawn-camping)
-- The NPC is NOT an ELITE (ELITEs almost never defect unless last alive)
-- There is strategic value (defection shifts balance, not already winning)
-If defection_allowed is false, do NOT trigger any defections.
-
-YOUR OUTPUT:
-The 'action' field of your response must be a JSON array of state changes:
-{
-  ""state_changes"": [
-    { ""npc_id"": ""npc_0"", ""new_state"": ""FLANK"", ""reason"": ""Player is camping, need angle"" },
-    { ""npc_id"": ""npc_2"", ""new_state"": ""SUPPRESS"", ""reason"": ""Pin while npc_0 flanks"" }
-  ],
-  ""squad_tactic"": ""pincer"",
-  ""tactic_reasoning"": ""Player dug in behind NW cover, deploying pincer to flush out""
-}
-
-Only include NPCs that should CHANGE state. Omit NPCs staying in current state.
-If no changes needed, return an empty state_changes array.
-Valid states: PATROL, ATTACK, FLANK, SUPPRESS, RETREAT, ALLIED
+OUTPUT action field as JSON:
+{""state_changes"":[{""npc_id"":""id"",""new_state"":""STATE"",""reason"":""brief""}],
+""squad_tactic"":""name"",""tactic_reasoning"":""brief""}
+Only include NPCs that CHANGE state. Empty array if no changes needed.
+Valid: PATROL,ATTACK,FLANK,SUPPRESS,RETREAT,ALLIED
 ".Trim();
 
         // ====================================================================

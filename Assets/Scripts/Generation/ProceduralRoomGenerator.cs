@@ -403,7 +403,7 @@ namespace Threshold.Generation
         // Spawn Zone Population
         // ====================================================================
 
-        private static void PopulateSpawnZones(RoomGraphConfig config, DifficultyProfile difficulty)
+        public static void PopulateSpawnZones(RoomGraphConfig config, DifficultyProfile difficulty)
         {
             int elitesRemaining = difficulty.eliteCount;
 
@@ -411,6 +411,10 @@ namespace Threshold.Generation
             {
                 if (room.role == RoomRole.ENTRY || room.role == RoomRole.EXIT ||
                     room.role == RoomRole.PACING || room.role == RoomRole.LOOT)
+                    continue;
+
+                // Skip rooms already populated (idempotency guard)
+                if (room.spawnZones != null && room.spawnZones.Count > 0)
                     continue;
 
                 int baseCount = difficulty.baseEnemiesPerRoom;
@@ -550,6 +554,121 @@ namespace Threshold.Generation
                         break;
                 }
             }
+        }
+
+        // ====================================================================
+        // Doorway Auto-Repair (compensates for LLM spatial reasoning gaps)
+        // ====================================================================
+
+        /// <summary>
+        /// Automatically repairs doorway consistency issues in AI-generated configs.
+        /// For each edge, ensures both rooms have the required doorway entries.
+        /// Also upgrades room shapes if they don't have enough doorways.
+        /// Returns the number of repairs made.
+        /// </summary>
+        public static int RepairDoorways(RoomGraphConfig config)
+        {
+            if (config == null || config.edges == null || config.rooms == null) return 0;
+
+            int repairs = 0;
+
+            foreach (var edge in config.edges)
+            {
+                var roomA = config.GetRoom(edge.roomIdA);
+                var roomB = config.GetRoom(edge.roomIdB);
+                if (roomA == null || roomB == null) continue;
+
+                Direction dirFromA = edge.directionFromA;
+                Direction dirFromB = (Direction)(((int)dirFromA + 2) % 4);
+
+                // Repair room A's doorway
+                if (!roomA.HasDoorway(dirFromA))
+                {
+                    if (roomA.doorways == null)
+                        roomA.doorways = new List<DoorwayConfig>();
+
+                    // Check if doorway exists but is closed
+                    var existing = roomA.GetDoorway(dirFromA);
+                    if (existing != null)
+                    {
+                        existing.isOpen = true;
+                        existing.connectedRoomId = edge.roomIdB;
+                    }
+                    else
+                    {
+                        roomA.doorways.Add(new DoorwayConfig
+                        {
+                            direction = dirFromA,
+                            isOpen = true,
+                            connectedRoomId = edge.roomIdB
+                        });
+                    }
+                    repairs++;
+                }
+
+                // Repair room B's doorway
+                if (!roomB.HasDoorway(dirFromB))
+                {
+                    if (roomB.doorways == null)
+                        roomB.doorways = new List<DoorwayConfig>();
+
+                    var existing = roomB.GetDoorway(dirFromB);
+                    if (existing != null)
+                    {
+                        existing.isOpen = true;
+                        existing.connectedRoomId = edge.roomIdA;
+                    }
+                    else
+                    {
+                        roomB.doorways.Add(new DoorwayConfig
+                        {
+                            direction = dirFromB,
+                            isOpen = true,
+                            connectedRoomId = edge.roomIdA
+                        });
+                    }
+                    repairs++;
+                }
+            }
+
+            // Upgrade room shapes if they now have more doorways than their shape allows
+            if (repairs > 0)
+            {
+                foreach (var room in config.rooms)
+                {
+                    int openCount = 0;
+                    if (room.doorways != null)
+                    {
+                        foreach (var d in room.doorways)
+                            if (d.isOpen) openCount++;
+                    }
+
+                    // Upgrade shape to match actual doorway count
+                    if (openCount >= 4 && room.shape != RoomShape.CROSSROADS)
+                        room.shape = RoomShape.CROSSROADS;
+                    else if (openCount == 3 && room.shape != RoomShape.T_JUNCTION && room.shape != RoomShape.CROSSROADS)
+                        room.shape = RoomShape.T_JUNCTION;
+                    else if (openCount == 2 && room.shape == RoomShape.DEAD_END)
+                        room.shape = RoomShape.CORNER; // Could be STRAIGHT too, but CORNER is safer
+                }
+
+                Debug.Log($"[ProceduralRoomGenerator] Auto-repaired {repairs} doorway(s) in AI-generated layout.");
+            }
+
+            // Repair spawn safety: ENTRY and EXIT rooms must have no enemies
+            foreach (var room in config.rooms)
+            {
+                if ((room.role == RoomRole.ENTRY || room.role == RoomRole.EXIT) &&
+                    room.spawnZones != null && room.spawnZones.Count > 0)
+                {
+                    int cleared = room.TotalEnemyCount();
+                    room.spawnZones.Clear();
+                    repairs++;
+                    Debug.Log($"[ProceduralRoomGenerator] Cleared {cleared} enemy spawn(s) from {room.role} room {room.roomId}.");
+                }
+            }
+
+            return repairs;
         }
 
         // ====================================================================

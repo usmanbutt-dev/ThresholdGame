@@ -2,7 +2,7 @@
 // GeminiAgentBridge.cs — Singleton communication layer for all 5 AI agents
 // THRESHOLD — Google Antigravity Mobile Game Challenge 2026
 //
-// Supports multiple LLM providers: Gemini (Google) and Groq (OpenAI-compatible).
+// Supports multiple LLM providers: Gemini, Groq, and NVIDIA NIM (OpenAI-compatible).
 // Toggle the provider via the Inspector dropdown — no code changes needed.
 //
 // Usage:
@@ -28,7 +28,7 @@ namespace Threshold.Agents
 {
     /// <summary>
     /// MonoBehaviour singleton that handles all LLM API communication.
-    /// Supports Gemini and Groq providers — select via Inspector dropdown.
+    /// Supports Gemini, Groq, and NVIDIA NIM providers — select via Inspector dropdown.
     /// Attach to a persistent GameObject in the scene.
     /// </summary>
     public class GeminiAgentBridge : MonoBehaviour
@@ -91,9 +91,27 @@ namespace Threshold.Agents
         [Tooltip("Max Groq requests per day. Free tier: 14400 RPD.")]
         [SerializeField] private int groqRpdLimit = 14400;
 
+        [Header("═══ NVIDIA NIM Configuration ═══")]
+        [Tooltip("NVIDIA API key (nvapi-...). If empty, reads from NVIDIA_API_KEY environment variable.")]
+        [SerializeField] private string nvidiaApiKey = "";
+
+        [Tooltip("Base URL for the NVIDIA NIM API.")]
+        [SerializeField] private string nvidiaApiBaseUrl = "https://integrate.api.nvidia.com/v1/chat/completions";
+
+        [Tooltip("NVIDIA model for Flash-tier calls (fast, low-latency).")]
+        [SerializeField] private string nvidiaFlashModelId = "meta/llama-3.1-8b-instruct";
+        [Tooltip("NVIDIA model for Pro-tier calls (higher reasoning).")]
+        [SerializeField] private string nvidiaProModelId = "nvidia/llama-3.3-nemotron-super-49b-v1";
+
+        [Header("═══ NVIDIA Rate Limiting ═══")]
+        [Tooltip("Max NVIDIA requests per minute. Free tier: 40 RPM.")]
+        [SerializeField] private int nvidiaRpmLimit = 40;
+        [Tooltip("Max NVIDIA requests per day. Free tier: ~1000 credits.")]
+        [SerializeField] private int nvidiaRpdLimit = 1000;
+
         [Header("═══ Generation Defaults ═══")]
-        [SerializeField] private float defaultTemperature = 0.7f;
-        [SerializeField] private int maxOutputTokens = 2048;
+        [SerializeField] private float defaultTemperature = 0.4f;
+        [SerializeField] private int maxOutputTokens = 1024;
 
         [Header("═══ Gemini Rate Limiting ═══")]
         [Tooltip("Max Flash requests per minute. Free tier: 15 RPM.")]
@@ -131,6 +149,9 @@ namespace Threshold.Agents
         // Rate limiting state — Groq
         private readonly List<float> _groqCallTimestamps = new();
         private int _groqDailyCount;
+        // Rate limiting state — NVIDIA
+        private readonly List<float> _nvidiaCallTimestamps = new();
+        private int _nvidiaDailyCount;
 
         private int _dailyDate; // Day-of-year tracker for daily reset
         private int _rateLimitRejections;
@@ -203,17 +224,9 @@ namespace Threshold.Agents
 
         private const string TraceFormatInstruction = @"
 
-CRITICAL OUTPUT FORMAT REQUIREMENT:
-You MUST respond with ONLY a valid JSON object containing exactly these 5 fields:
-{
-  ""observation"": ""<what you observed from the game state data>"",
-  ""inference"": ""<what you conclude from those observations>"",
-  ""decision"": ""<what action you chose and WHY>"",
-  ""action"": ""<structured JSON string of the action to execute>"",
-  ""evaluation_plan"": ""<what to measure next to check if this decision worked>""
-}
-Do NOT include any text outside the JSON object. Do NOT use markdown code fences.
-All 5 fields are mandatory and must be non-empty strings.";
+OUTPUT: Respond with ONLY valid JSON, no markdown. Required 5 fields:
+{""observation"":""<data seen>"",""inference"":""<conclusion>"",""decision"":""<action+why>"",""action"":""<JSON payload>"",""evaluation_plan"":""<metric to check>""}
+All fields mandatory, non-empty. Keep each field concise (1-2 sentences max). No text outside JSON.";
 
         // ====================================================================
         // Lifecycle
@@ -252,23 +265,41 @@ All 5 fields are mandatory and must be non-empty strings.";
             if (string.IsNullOrWhiteSpace(groqApiKey))
                 groqApiKey = Environment.GetEnvironmentVariable("GROQ_API_KEY") ?? "";
 
+            // NVIDIA key
+            if (string.IsNullOrWhiteSpace(nvidiaApiKey))
+                nvidiaApiKey = Environment.GetEnvironmentVariable("NVIDIA_API_KEY") ?? "";
+
             if (logToConsole)
             {
                 string providerLabel = activeProvider.ToString().ToUpper();
-                bool hasKey = activeProvider == LLMProvider.Gemini
-                    ? !string.IsNullOrWhiteSpace(apiKey)
-                    : !string.IsNullOrWhiteSpace(groqApiKey);
+                bool hasKey = activeProvider switch
+                {
+                    LLMProvider.Gemini => !string.IsNullOrWhiteSpace(apiKey),
+                    LLMProvider.Groq   => !string.IsNullOrWhiteSpace(groqApiKey),
+                    LLMProvider.Nvidia => !string.IsNullOrWhiteSpace(nvidiaApiKey),
+                    _ => false
+                };
 
                 if (hasKey)
                 {
-                    string models = activeProvider == LLMProvider.Gemini
-                        ? $"Flash: {flashModelId}, Pro: {proModelId}"
-                        : $"Flash: {groqFlashModelId}, Pro: {groqProModelId}";
+                    string models = activeProvider switch
+                    {
+                        LLMProvider.Gemini => $"Flash: {flashModelId}, Pro: {proModelId}",
+                        LLMProvider.Groq   => $"Flash: {groqFlashModelId}, Pro: {groqProModelId}",
+                        LLMProvider.Nvidia => $"Flash: {nvidiaFlashModelId}, Pro: {nvidiaProModelId}",
+                        _ => "unknown"
+                    };
                     Debug.Log($"[AgentBridge] Provider: {providerLabel} — API key loaded. {models}");
                 }
                 else
                 {
-                    string envVar = activeProvider == LLMProvider.Gemini ? "GEMINI_API_KEY" : "GROQ_API_KEY";
+                    string envVar = activeProvider switch
+                    {
+                        LLMProvider.Gemini => "GEMINI_API_KEY",
+                        LLMProvider.Groq   => "GROQ_API_KEY",
+                        LLMProvider.Nvidia => "NVIDIA_API_KEY",
+                        _ => "API_KEY"
+                    };
                     Debug.LogWarning($"[AgentBridge] Provider: {providerLabel} — No API key. " +
                                      $"Set via Inspector or {envVar} environment variable.");
                 }
@@ -276,8 +307,13 @@ All 5 fields are mandatory and must be non-empty strings.";
         }
 
         /// <summary>Returns the active API key based on the selected provider.</summary>
-        private string GetActiveApiKey() =>
-            activeProvider == LLMProvider.Gemini ? apiKey : groqApiKey;
+        private string GetActiveApiKey() => activeProvider switch
+        {
+            LLMProvider.Gemini => apiKey,
+            LLMProvider.Groq   => groqApiKey,
+            LLMProvider.Nvidia => nvidiaApiKey,
+            _ => ""
+        };
 
         // ====================================================================
         // Public API
@@ -328,11 +364,20 @@ All 5 fields are mandatory and must be non-empty strings.";
                 string body;
                 Dictionary<string, string> headers = new();
 
-                if (activeProvider == LLMProvider.Groq)
+                if (activeProvider == LLMProvider.Nvidia)
+                {
+                    // --- NVIDIA NIM: OpenAI-compatible chat completions ---
+                    url = nvidiaApiBaseUrl;
+                    body = BuildOpenAIRequestBody(request,
+                        request.model == GeminiModel.Flash ? nvidiaFlashModelId : nvidiaProModelId);
+                    headers["Authorization"] = $"Bearer {nvidiaApiKey}";
+                }
+                else if (activeProvider == LLMProvider.Groq)
                 {
                     // --- Groq: OpenAI-compatible chat completions ---
                     url = groqApiBaseUrl;
-                    body = BuildGroqRequestBody(request);
+                    body = BuildOpenAIRequestBody(request,
+                        request.model == GeminiModel.Flash ? groqFlashModelId : groqProModelId);
                     headers["Authorization"] = $"Bearer {groqApiKey}";
                 }
                 else
@@ -389,7 +434,7 @@ All 5 fields are mandatory and must be non-empty strings.";
                 stopwatch.Stop();
 
                 // Parse response based on provider
-                string content = activeProvider == LLMProvider.Groq
+                string content = (activeProvider == LLMProvider.Groq || activeProvider == LLMProvider.Nvidia)
                     ? ExtractContentFromGroqResponse(responseText)
                     : ExtractContentFromGeminiResponse(responseText);
 
@@ -469,13 +514,20 @@ All 5 fields are mandatory and must be non-empty strings.";
         {
             ResetDailyCountIfNeeded();
             string mode = useMockResponses ? "MOCK (no API calls)" : $"LIVE ({activeProvider})";
-            string providerStats = activeProvider == LLMProvider.Groq
-                ? $"  Groq: {_groqDailyCount}/{groqRpdLimit} daily, " +
-                  $"{GetRecentCallCount(_groqCallTimestamps)}/{groqRpmLimit} RPM"
-                : $"  Flash: {_flashDailyCount}/{flashRpdLimit} daily, " +
-                  $"{GetRecentCallCount(_flashCallTimestamps)}/{flashRpmLimit} RPM\n" +
-                  $"  Pro:   {_proDailyCount}/{proRpdLimit} daily, " +
-                  $"{GetRecentCallCount(_proCallTimestamps)}/{proRpmLimit} RPM";
+            string providerStats = activeProvider switch
+            {
+                LLMProvider.Nvidia =>
+                    $"  NVIDIA: {_nvidiaDailyCount}/{nvidiaRpdLimit} daily, " +
+                    $"{GetRecentCallCount(_nvidiaCallTimestamps)}/{nvidiaRpmLimit} RPM",
+                LLMProvider.Groq =>
+                    $"  Groq: {_groqDailyCount}/{groqRpdLimit} daily, " +
+                    $"{GetRecentCallCount(_groqCallTimestamps)}/{groqRpmLimit} RPM",
+                _ =>
+                    $"  Flash: {_flashDailyCount}/{flashRpdLimit} daily, " +
+                    $"{GetRecentCallCount(_flashCallTimestamps)}/{flashRpmLimit} RPM\n" +
+                    $"  Pro:   {_proDailyCount}/{proRpdLimit} daily, " +
+                    $"{GetRecentCallCount(_proCallTimestamps)}/{proRpmLimit} RPM"
+            };
 
             return $"[Usage Report]\n" +
                    $"  Mode: {mode}\n" +
@@ -593,19 +645,16 @@ All 5 fields are mandatory and must be non-empty strings.";
         }
 
         // ====================================================================
-        // Internal: Request Building — Groq
+        // Internal: Request Building — OpenAI-Compatible (Groq + NVIDIA NIM)
         // ====================================================================
 
         /// <summary>
-        /// Builds the Groq API request body JSON using OpenAI chat completions format.
+        /// Builds an OpenAI-compatible chat completions request body.
+        /// Used by both Groq and NVIDIA NIM providers.
         /// System prompt goes in a "system" message, game state in a "user" message.
         /// </summary>
-        private string BuildGroqRequestBody(AgentRequest request)
+        private string BuildOpenAIRequestBody(AgentRequest request, string modelId)
         {
-            string modelId = request.model == GeminiModel.Flash
-                ? groqFlashModelId
-                : groqProModelId;
-
             var apiRequest = new GroqApiRequest
             {
                 model = modelId,
@@ -838,7 +887,7 @@ All 5 fields are mandatory and must be non-empty strings.";
         {
             try
             {
-                if (activeProvider == LLMProvider.Groq)
+                if (activeProvider == LLMProvider.Groq || activeProvider == LLMProvider.Nvidia)
                 {
                     var groqErr = JsonUtility.FromJson<GroqApiResponse>(responseBody);
                     if (groqErr?.error != null)
@@ -907,7 +956,15 @@ All 5 fields are mandatory and must be non-empty strings.";
         {
             ResetDailyCountIfNeeded();
 
-            if (activeProvider == LLMProvider.Groq)
+            if (activeProvider == LLMProvider.Nvidia)
+            {
+                // NVIDIA NIM: single shared limit
+                if (_nvidiaDailyCount >= nvidiaRpdLimit)
+                    return $"NVIDIA daily limit reached ({nvidiaRpdLimit} RPD). Wait until tomorrow or enable mock mode.";
+                if (GetRecentCallCount(_nvidiaCallTimestamps) >= nvidiaRpmLimit)
+                    return $"NVIDIA rate limit reached ({nvidiaRpmLimit} RPM). Wait ~60s or enable mock mode.";
+            }
+            else if (activeProvider == LLMProvider.Groq)
             {
                 // Groq: single shared limit across all model tiers
                 if (_groqDailyCount >= groqRpdLimit)
@@ -944,7 +1001,12 @@ All 5 fields are mandatory and must be non-empty strings.";
         {
             float now = Time.realtimeSinceStartup;
 
-            if (activeProvider == LLMProvider.Groq)
+            if (activeProvider == LLMProvider.Nvidia)
+            {
+                _nvidiaCallTimestamps.Add(now);
+                _nvidiaDailyCount++;
+            }
+            else if (activeProvider == LLMProvider.Groq)
             {
                 _groqCallTimestamps.Add(now);
                 _groqDailyCount++;
@@ -984,6 +1046,7 @@ All 5 fields are mandatory and must be non-empty strings.";
                 _flashDailyCount = 0;
                 _proDailyCount = 0;
                 _groqDailyCount = 0;
+                _nvidiaDailyCount = 0;
                 if (logToConsole)
                     Debug.Log("[AgentBridge] Daily rate limit counters reset.");
             }

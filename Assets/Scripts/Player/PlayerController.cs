@@ -209,6 +209,7 @@ namespace Threshold.Player
             TeleportTo(spawnPosition);
             _health?.ResetHealth();
             GetComponent<PlayerWeapon>()?.ResetAmmo();
+            GetComponent<PlayerAnimator>()?.ResetAnimator();
 
             Debug.Log("[PlayerController] Reset for new run.");
         }

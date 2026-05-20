@@ -16,7 +16,8 @@ namespace Threshold.Agents
     public enum LLMProvider
     {
         Gemini,
-        Groq
+        Groq,
+        Nvidia
     }
 
     /// <summary>
@@ -47,7 +48,7 @@ namespace Threshold.Agents
         /// <summary>Which Gemini model to use for this call.</summary>
         public GeminiModel model;
 
-        /// <summary>Request timeout in seconds. Default 5s for Flash, 10s for Pro.</summary>
+        /// <summary>Request timeout in seconds. Default 15s for Flash, 20s for Pro.</summary>
         public int timeoutSeconds;
 
         public AgentRequest(string agentName, string systemPrompt, string gameStateJson,
@@ -57,8 +58,8 @@ namespace Threshold.Agents
             this.systemPrompt = systemPrompt;
             this.gameStateJson = gameStateJson;
             this.model = model;
-            // Default timeout: 5s for Flash, 10s for Pro
-            this.timeoutSeconds = timeoutSeconds > 0 ? timeoutSeconds : (model == GeminiModel.Flash ? 5 : 10);
+            // Default timeout: 15s for Flash, 45s for Pro (49B Nemotron needs warm-up on free tier)
+            this.timeoutSeconds = timeoutSeconds > 0 ? timeoutSeconds : (model == GeminiModel.Flash ? 15 : 45);
         }
     }
 

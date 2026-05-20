@@ -51,12 +51,12 @@ namespace Threshold.Player
         [Tooltip("Optional muzzle flash prefab (particle system).")]
         [SerializeField] private GameObject muzzleFlashPrefab;
 
-        [Header("Tracer")]
+        [Header("Laser Tracer")]
         [Tooltip("If true, spawns a ProjectileTracer on each shot.")]
         [SerializeField] private bool useTracers = true;
 
-        [Tooltip("Tracer color for player shots.")]
-        [SerializeField] private Color tracerColor = new(0.3f, 0.9f, 1f, 0.8f);
+        [Tooltip("Full laser beam appearance config — color, size, fade, glow.")]
+        [SerializeField] private TracerConfig tracerConfig = TracerConfig.Default;
 
         [Header("Layers")]
         [Tooltip("Layers the weapon can hit.")]
@@ -206,7 +206,7 @@ namespace Threshold.Player
             // Spawn tracer visual
             if (useTracers)
             {
-                ProjectileTracer.Spawn(origin, endPoint, tracerColor);
+                ProjectileTracer.Spawn(origin, endPoint, tracerConfig);
             }
 
             // Spawn muzzle flash

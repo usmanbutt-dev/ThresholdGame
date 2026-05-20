@@ -47,6 +47,12 @@ namespace Threshold.Generation
         private readonly List<GameObject> _instantiatedRooms = new();
         private readonly List<GameObject> _instantiatedItems = new();
         private readonly Dictionary<string, RoomModule> _roomModuleMap = new();
+
+        /// <summary>
+        /// Unscaled container for spawned entities (NPCs, items, player).
+        /// Prevents child objects from inheriting room prefab scale.
+        /// </summary>
+        private Transform _entityContainer;
         private GameObject _spawnedPlayer;
 
         /// <summary>World position of the ENTRY room center.</summary>
@@ -82,6 +88,14 @@ namespace Threshold.Generation
 
             CleanUp();
             CurrentConfig = config;
+
+            // Create unscaled root-level container for entities (NPCs, items)
+            // Parented to scene root (not FloorGenerator) to guarantee world scale = (1,1,1)
+            var containerObj = new GameObject("_EntityContainer");
+            containerObj.transform.position = Vector3.zero;
+            containerObj.transform.rotation = Quaternion.identity;
+            containerObj.transform.localScale = Vector3.one;
+            _entityContainer = containerObj.transform;
 
             float mw = GetModuleWidth();
             bool hasSkippedCriticalRoom = false;
@@ -224,6 +238,13 @@ namespace Threshold.Generation
             {
                 Destroy(_spawnedPlayer);
                 _spawnedPlayer = null;
+            }
+
+            // Destroy entity container (takes all NPCs and items with it)
+            if (_entityContainer != null)
+            {
+                Destroy(_entityContainer.gameObject);
+                _entityContainer = null;
             }
 
             foreach (var obj in _instantiatedRooms)
@@ -383,7 +404,9 @@ namespace Threshold.Generation
 
                     Vector3 worldPos = module.transform.TransformPoint(localOffset);
 
-                    GameObject npcObj = Instantiate(npcPrefab, worldPos, Quaternion.identity, module.transform);
+                    // Spawn under unscaled container to prevent inheriting room scale
+                    Transform parent = _entityContainer != null ? _entityContainer : null;
+                    GameObject npcObj = Instantiate(npcPrefab, worldPos, Quaternion.identity, parent);
                     string npcId = $"npc_{roomConfig.roomId}_{npcIndex}";
                     npcObj.name = npcId;
 
@@ -450,9 +473,11 @@ namespace Threshold.Generation
             bool hasW = defaults[((3 - rotSteps) % 4 + 4) % 4];
 
             float half = mw * 0.5f;
-            float wallHeight = 3f;
-            float wallThickness = 0.2f;
-            float doorWidth = 4f;
+            // Scale seal dimensions proportionally to module width
+            // (at mw=10: height=3, thickness=0.2, doorWidth=4)
+            float wallHeight = mw * 0.3f;
+            float wallThickness = mw * 0.02f;
+            float doorWidth = mw * 0.4f;
 
             // If prefab has a door but graph doesn't need it, seal it.
             // Seal positions use LOCAL coordinates — the parent is rotated so
@@ -496,9 +521,22 @@ namespace Threshold.Generation
             GameObject wall = GameObject.CreatePrimitive(PrimitiveType.Cube);
             wall.name = "SealWall";
             wall.transform.SetParent(parent);
-            wall.transform.localPosition = localPos;
-            wall.transform.localScale = scale;
             wall.transform.localRotation = Quaternion.identity;
+
+            // Compensate for parent scale: divide desired world-space dimensions
+            // by parent's lossy scale so the wall appears at the correct size.
+            // Without this, a parent scale of (3,1.5,3) would triple the wall.
+            Vector3 parentScale = parent.lossyScale;
+            wall.transform.localPosition = new Vector3(
+                localPos.x / parentScale.x,
+                localPos.y / parentScale.y,
+                localPos.z / parentScale.z
+            );
+            wall.transform.localScale = new Vector3(
+                scale.x / parentScale.x,
+                scale.y / parentScale.y,
+                scale.z / parentScale.z
+            );
 
             // Match existing wall material if possible
             var existingWall = parent.Find("Floor");
@@ -556,7 +594,9 @@ namespace Threshold.Generation
                     position = module.transform.TransformPoint(item.localPosition);
                 }
 
-                GameObject itemObj = Instantiate(prefab, position, Quaternion.identity, module.transform);
+                // Spawn under unscaled container to prevent inheriting room scale
+                Transform itemParent = _entityContainer != null ? _entityContainer : null;
+                GameObject itemObj = Instantiate(prefab, position, Quaternion.identity, itemParent);
                 itemObj.name = $"Item_{item.itemType}";
                 _instantiatedItems.Add(itemObj);
             }

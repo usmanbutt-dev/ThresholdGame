@@ -415,11 +415,11 @@ MonoBehaviour:
     m_Bits: 1
   m_VolumeTrigger: {fileID: 0}
   m_VolumeFrameworkUpdateModeOption: 2
-  m_RenderPostProcessing: 0
-  m_Antialiasing: 0
-  m_AntialiasingQuality: 2
+  m_RenderPostProcessing: 1
+  m_Antialiasing: 2
+  m_AntialiasingQuality: 1
   m_StopNaN: 0
-  m_Dithering: 0
+  m_Dithering: 1
   m_ClearDepth: 1
   m_AllowXRRendering: 1
   m_AllowHDROutput: 1
@@ -567,7 +567,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4e4f5dcd685d8843acd395519df7cf1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Threshold.Agents.GeminiAgentBridge
-  activeProvider: 1
+  activeProvider: 2
   apiKey: 
   apiBaseUrl: https://generativelanguage.googleapis.com/v1beta/models
   flashModelId: gemini-2.0-flash
@@ -578,6 +578,12 @@ MonoBehaviour:
   groqProModelId: llama-3.3-70b-versatile
   groqRpmLimit: 30
   groqRpdLimit: 14400
+  nvidiaApiKey: 
+  nvidiaApiBaseUrl: https://integrate.api.nvidia.com/v1/chat/completions
+  nvidiaFlashModelId: meta/llama-3.1-8b-instruct
+  nvidiaProModelId: nvidia/llama-3.3-nemotron-super-49b-v1
+  nvidiaRpmLimit: 40
+  nvidiaRpdLimit: 1000
   defaultTemperature: 0.7
   maxOutputTokens: 2048
   flashRpmLimit: 15
@@ -767,6 +773,55 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1618461746
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1618461748}
+  - component: {fileID: 1618461747}
+  m_Layer: 0
+  m_Name: PostProcess_Volume
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1618461747
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1618461746}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 172515602e62fb746b5d573b38a5fe58, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.RenderPipelines.Core.Runtime::UnityEngine.Rendering.Volume
+  m_IsGlobal: 1
+  priority: 1
+  blendDistance: 0
+  weight: 1
+  sharedProfile: {fileID: 11400000, guid: fe67af8dfea6f3349ad1ebfab4cd6d54, type: 2}
+--- !u!4 &1618461748
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1618461746}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1755400936
 GameObject:
   m_ObjectHideFlags: 0
@@ -867,7 +922,7 @@ MonoBehaviour:
   - {fileID: 8045315411645630725, guid: 1abde76934dacf74b9bf9d08abc317bd, type: 3}
   - {fileID: 5810378706642482194, guid: 2617b4d04bab96246baf784a1e656273, type: 3}
   - {fileID: 6691344781977802829, guid: 707070771f2c0a14591f7c531a36d974, type: 3}
-  playerPrefab: {fileID: 3975537830382640273, guid: f55a6cd580d75784d85eae5f09610fa4, type: 3}
+  playerPrefab: {fileID: 7130516591603394225, guid: 23f36bced4906844e97a553aac277c1d, type: 3}
   healthKitPrefab: {fileID: 0}
   ammoCachePrefab: {fileID: 0}
   weaponPickupPrefab: {fileID: 0}
@@ -1010,3 +1065,4 @@ SceneRoots:
   - {fileID: 675608487}
   - {fileID: 2136954608}
   - {fileID: 1502024835}
+  - {fileID: 1618461748}
