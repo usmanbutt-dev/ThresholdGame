@@ -1645,7 +1645,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Threshold.Agents.GeminiAgentBridge
   activeProvider: 1
-  apiKey: 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
+  apiKey: 
   apiBaseUrl: https://generativelanguage.googleapis.com/v1beta/models
   flashModelId: gemini-2.0-flash
   proModelId: gemini-2.0-pro
