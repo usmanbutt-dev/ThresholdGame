@@ -257,8 +257,8 @@ namespace Threshold.Player
             if (weapon == null) weapon = player.GetComponentInParent<PlayerWeapon>();
             if (weapon == null) return false;
 
-            // Don't pick up if ammo is already full
-            if (weapon.AmmoPercent >= 1f) return false;
+            // Don't pick up if reserve ammo is already full
+            if (weapon.ReserveAmmo >= weapon.MaxReserveAmmo) return false;
 
             int amount = ammoAmount > 0 ? ammoAmount : 10; // Default
             weapon.AddAmmo(amount);

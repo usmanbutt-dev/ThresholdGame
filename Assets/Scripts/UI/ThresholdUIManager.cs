@@ -35,6 +35,19 @@ namespace Threshold.UI
         public int canvasSortOrder = 100;
         public Vector2 referenceResolution = new(1080, 1920);
 
+        [Header("Pause Button Settings (Inspector-Adjustable)")]
+        [Tooltip("Offset of the pause button from top-right corner of the safe area.")]
+        public Vector2 pauseButtonOffset = new(-24f, -82f);
+
+        [Tooltip("Diameter of the circular pause button in screen pixels.")]
+        public float pauseButtonSize = 60f;
+
+        [Tooltip("Color and transparency of the pause button.")]
+        public Color pauseButtonColor = new(0.12f, 0.12f, 0.18f, 0.65f);
+
+        [Tooltip("Text size of the pause icon (❚❚).")]
+        public int pauseButtonIconSize = 28;
+
         // ====================================================================
         // State
         // ====================================================================
@@ -62,7 +75,6 @@ namespace Threshold.UI
         {
             if (Instance != null && Instance != this) { Destroy(gameObject); return; }
             Instance = this;
-            DontDestroyOnLoad(gameObject);
         }
 
         private void Start()
@@ -72,6 +84,32 @@ namespace Threshold.UI
             InitializeComponents();
 
             Debug.Log("[ThresholdUI] All UI systems initialized.");
+        }
+
+        private void Update()
+        {
+            // Apply pause button settings dynamically every frame so they can be tuned live in the Inspector
+            if (_pauseButtonObj != null)
+            {
+                var rect = _pauseButtonObj.GetComponent<RectTransform>();
+                if (rect != null)
+                {
+                    rect.anchoredPosition = pauseButtonOffset;
+                    rect.sizeDelta = new Vector2(pauseButtonSize, pauseButtonSize);
+                }
+
+                var img = _pauseButtonObj.GetComponent<Image>();
+                if (img != null)
+                {
+                    img.color = pauseButtonColor;
+                }
+
+                var text = _pauseButtonObj.GetComponentInChildren<Text>();
+                if (text != null)
+                {
+                    text.fontSize = pauseButtonIconSize;
+                }
+            }
         }
 
         private void OnDestroy()
@@ -385,19 +423,27 @@ namespace Threshold.UI
             var canvas = FindAnyObjectByType<Canvas>();
             if (canvas == null) return;
 
+            // Notch safe area container created by GameplayHUD
+            Transform parentTransform = canvas.transform;
+            var safeArea = GameObject.Find("SafeArea_Container");
+            if (safeArea != null)
+            {
+                parentTransform = safeArea.transform;
+            }
+
             // Container
             var btnObj = new GameObject("PauseButton", typeof(RectTransform), typeof(Image));
-            btnObj.transform.SetParent(canvas.transform, false);
+            btnObj.transform.SetParent(parentTransform, false);
 
             var btnRect = btnObj.GetComponent<RectTransform>();
             // Position: top-right, below the ammo bar
             btnRect.anchorMin = btnRect.anchorMax = new Vector2(1f, 1f);
             btnRect.pivot = new Vector2(1f, 1f);
-            btnRect.anchoredPosition = new Vector2(-24f, -82f);
-            btnRect.sizeDelta = new Vector2(60f, 60f);
+            btnRect.anchoredPosition = pauseButtonOffset;
+            btnRect.sizeDelta = new Vector2(pauseButtonSize, pauseButtonSize);
 
             var btnImage = btnObj.GetComponent<Image>();
-            btnImage.color = new Color(0.12f, 0.12f, 0.18f, 0.65f);
+            btnImage.color = pauseButtonColor;
             btnImage.raycastTarget = true;
 
             // Pause icon text (❚❚)
@@ -410,10 +456,10 @@ namespace Threshold.UI
 
             var iconText = iconObj.GetComponent<Text>();
             iconText.text = "❚❚";
-            iconText.fontSize = 28;
+            iconText.fontSize = pauseButtonIconSize;
             iconText.color = new Color(0.9f, 0.9f, 0.95f, 0.9f);
             iconText.alignment = TextAnchor.MiddleCenter;
-            iconText.font = Font.CreateDynamicFontFromOSFont("Arial", 28);
+            iconText.font = Font.CreateDynamicFontFromOSFont("Arial", pauseButtonIconSize);
             iconText.raycastTarget = false;
 
             // Button component

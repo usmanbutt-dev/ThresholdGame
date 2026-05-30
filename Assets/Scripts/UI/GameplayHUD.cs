@@ -61,6 +61,7 @@ namespace Threshold.UI
         // ====================================================================
 
         private Canvas _canvas;
+        private Transform _safeAreaTransform;
 
         // Health
         [SerializeField] private RectTransform _healthBarBg;
@@ -122,6 +123,17 @@ namespace Threshold.UI
         {
             _canvas = GetOrCreateCanvas();
 
+            // Create a central safe area container so all HUD elements adapt to notched mobile devices
+            var safeAreaObj = new GameObject("SafeArea_Container", typeof(RectTransform));
+            safeAreaObj.transform.SetParent(_canvas.transform, false);
+            var safeAreaRect = safeAreaObj.GetComponent<RectTransform>();
+            safeAreaRect.anchorMin = Vector2.zero;
+            safeAreaRect.anchorMax = Vector2.one;
+            safeAreaRect.offsetMin = Vector2.zero;
+            safeAreaRect.offsetMax = Vector2.zero;
+            safeAreaObj.AddComponent<MobileSafeArea>();
+            _safeAreaTransform = safeAreaObj.transform;
+
             // Skip building elements that are already wired by editor
             if (_healthBarFill == null) BuildHealthBar();
             if (_ammoText == null) BuildAmmoCounter();
@@ -154,7 +166,7 @@ namespace Threshold.UI
         private void BuildHealthBar()
         {
             // Container
-            var container = CreatePanel("HealthBar_Container", _canvas.transform);
+            var container = CreatePanel("HealthBar_Container", _safeAreaTransform);
             var containerRect = container.GetComponent<RectTransform>();
             containerRect.anchorMin = new Vector2(0f, 1f);
             containerRect.anchorMax = new Vector2(0f, 1f);
@@ -205,7 +217,7 @@ namespace Threshold.UI
         // --- AMMO COUNTER (top-right) ---
         private void BuildAmmoCounter()
         {
-            var container = CreatePanel("Ammo_Container", _canvas.transform);
+            var container = CreatePanel("Ammo_Container", _safeAreaTransform);
             var containerRect = container.GetComponent<RectTransform>();
             containerRect.anchorMin = new Vector2(1f, 1f);
             containerRect.anchorMax = new Vector2(1f, 1f);
@@ -228,7 +240,7 @@ namespace Threshold.UI
         // --- KILL COUNTER (top-center-left, below health) ---
         private void BuildKillCounter()
         {
-            var textObj = CreateText("Kill_Text", _canvas.transform,
+            var textObj = CreateText("Kill_Text", _safeAreaTransform,
                 "KILLS: 0", 20, new Color(1f, 0.4f, 0.4f, 0.9f), TextAnchor.MiddleLeft);
             var rect = textObj.GetComponent<RectTransform>();
             rect.anchorMin = new Vector2(0f, 1f);
@@ -242,7 +254,7 @@ namespace Threshold.UI
         // --- ROOM PROGRESS (top-center) ---
         private void BuildRoomProgress()
         {
-            var container = CreatePanel("Room_Container", _canvas.transform);
+            var container = CreatePanel("Room_Container", _safeAreaTransform);
             var containerRect = container.GetComponent<RectTransform>();
             containerRect.anchorMin = new Vector2(0.5f, 1f);
             containerRect.anchorMax = new Vector2(0.5f, 1f);
@@ -284,7 +296,7 @@ namespace Threshold.UI
         // --- FIRE BUTTON (bottom-right) ---
         private void BuildFireButton()
         {
-            var btnObj = CreatePanel("Fire_Button", _canvas.transform);
+            var btnObj = CreatePanel("Fire_Button", _safeAreaTransform);
             var btnRect = btnObj.GetComponent<RectTransform>();
             btnRect.anchorMin = new Vector2(1f, 0f);
             btnRect.anchorMax = new Vector2(1f, 0f);

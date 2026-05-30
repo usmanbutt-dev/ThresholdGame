@@ -38,6 +38,12 @@ namespace Threshold.Player
         [Tooltip("Magazine size.")]
         [SerializeField] private int magazineSize = 30;
 
+        [Tooltip("Max reserve ammo pool the player can carry.")]
+        [SerializeField] private int maxReserveAmmo = 120;
+
+        [Tooltip("Starting reserve ammo.")]
+        [SerializeField] private int startingReserveAmmo = 90;
+
         [Tooltip("Reload time in seconds.")]
         [SerializeField] private float reloadTime = 1.5f;
 
@@ -96,6 +102,12 @@ namespace Threshold.Player
         /// <summary>Current ammo in magazine.</summary>
         public int CurrentAmmo { get; private set; }
 
+        /// <summary>Current spare ammo in reserve.</summary>
+        public int ReserveAmmo { get; private set; }
+
+        /// <summary>Max reserve ammo limit.</summary>
+        public int MaxReserveAmmo => maxReserveAmmo;
+
         /// <summary>True while reloading.</summary>
         public bool IsReloading { get; private set; }
 
@@ -129,6 +141,7 @@ namespace Threshold.Player
         private void Start()
         {
             CurrentAmmo = magazineSize;
+            ReserveAmmo = startingReserveAmmo;
             SyncAmmoHUD();
 
             // Cache or add an AudioSource for weapon SFX
@@ -194,17 +207,18 @@ namespace Threshold.Player
         public void ResetAmmo()
         {
             CurrentAmmo = magazineSize;
+            ReserveAmmo = startingReserveAmmo;
             IsReloading = false;
             SyncAmmoHUD();
         }
 
-        /// <summary>Add ammo rounds (from pickups). Capped at magazine size.</summary>
+        /// <summary>Add ammo rounds (from pickups) directly to the reserve pool.</summary>
         public void AddAmmo(int amount)
         {
             if (amount <= 0) return;
-            CurrentAmmo = Mathf.Min(CurrentAmmo + amount, magazineSize);
+            ReserveAmmo = Mathf.Min(ReserveAmmo + amount, maxReserveAmmo);
             SyncAmmoHUD();
-            Debug.Log($"[PlayerWeapon] Added {amount} ammo. Now: {CurrentAmmo}/{magazineSize}");
+            Debug.Log($"[PlayerWeapon] Added {amount} to reserve. Now: {ReserveAmmo}/{maxReserveAmmo}");
         }
 
         // ====================================================================
@@ -220,7 +234,7 @@ namespace Threshold.Player
             // Check ammo
             if (CurrentAmmo <= 0)
             {
-                if (autoReload) StartReload();
+                if (autoReload && ReserveAmmo > 0) StartReload();
                 return;
             }
 
@@ -277,7 +291,7 @@ namespace Threshold.Player
             OnShot?.Invoke(visualOrigin);
 
             // Auto-reload on empty
-            if (CurrentAmmo <= 0 && autoReload)
+            if (CurrentAmmo <= 0 && autoReload && ReserveAmmo > 0)
             {
                 StartReload();
             }
@@ -326,11 +340,17 @@ namespace Threshold.Player
         private void FinishReload()
         {
             IsReloading = false;
-            CurrentAmmo = magazineSize;
+
+            int needed = magazineSize - CurrentAmmo;
+            int transfer = Mathf.Min(needed, ReserveAmmo);
+
+            CurrentAmmo += transfer;
+            ReserveAmmo -= transfer;
+
             SyncAmmoHUD();
             OnReloadComplete?.Invoke();
 
-            Debug.Log("[PlayerWeapon] Reload complete.");
+            Debug.Log($"[PlayerWeapon] Reload complete. Magazine: {CurrentAmmo}/{magazineSize}, Reserve: {ReserveAmmo}");
         }
 
         // ====================================================================
@@ -339,7 +359,7 @@ namespace Threshold.Player
 
         private void SyncAmmoHUD()
         {
-            UI.ThresholdUIManager.Instance?.UpdateAmmo(CurrentAmmo, magazineSize);
+            UI.ThresholdUIManager.Instance?.UpdateAmmo(CurrentAmmo, ReserveAmmo);
 
             // Also update live stats for metrics
             PlayerMetricsTracker.Instance?.UpdateLiveStats(

@@ -1874,6 +1874,10 @@ MonoBehaviour:
   pauseScreen: {fileID: 0}
   canvasSortOrder: 100
   referenceResolution: {x: 1080, y: 1920}
+  pauseButtonOffset: {x: -24, y: -120}
+  pauseButtonSize: 100
+  pauseButtonColor: {r: 0.12, g: 0.12, b: 0.18, a: 0.65}
+  pauseButtonIconSize: 40
 --- !u!4 &1217085222
 Transform:
   m_ObjectHideFlags: 0

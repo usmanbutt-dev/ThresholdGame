@@ -291,6 +291,9 @@ namespace Threshold.Core
             _killStreak = 0;
             _currentPlayerRoomId = null;
 
+            // Start HUD run tracking with total generated rooms
+            UI.ThresholdUIManager.Instance?.StartRun(_currentConfig?.rooms?.Count ?? targetRoomCount);
+
             // Step 9: Enter the first room in metrics tracking + brain
             var entryRoomConfig = _currentConfig?.rooms?.Find(r => r.role == RoomRole.ENTRY);
             if (entryRoomConfig != null)
@@ -578,6 +581,10 @@ namespace Threshold.Core
                 PlayerMetricsTracker.Instance?.OnRoomEnter(
                     room.roomId, room.role,
                     _playerHealth != null ? _playerHealth.HealthPercent : 1f);
+
+                // Update HUD Room Progress
+                int roomIndex = (_currentConfig?.rooms?.IndexOf(room) ?? 0) + 1;
+                UI.ThresholdUIManager.Instance?.UpdateRoomProgress(roomIndex, _currentConfig?.rooms?.Count ?? targetRoomCount);
             }
         }
 
