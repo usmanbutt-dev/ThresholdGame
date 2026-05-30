@@ -231,32 +231,35 @@ namespace Threshold.Player
             if (shootSFX != null && _audioSource != null)
                 _audioSource.PlayOneShot(shootSFX, sfxVolume);
 
-            // Muzzle position and direction
-            Vector3 origin = muzzlePoint != null
+            // Physics origin: Start raycast from player's core (safely behind gun tip to prevent point-blank clipping)
+            Vector3 physicsOrigin = transform.position + Vector3.up * 0.8f;
+            Vector3 direction = transform.forward;
+
+            // Visual origin: Spawn tracers, flashes, and fire events from the actual gun tip (muzzlePoint)
+            Vector3 visualOrigin = muzzlePoint != null
                 ? muzzlePoint.position
                 : transform.position + Vector3.up * 0.8f;
-            Vector3 direction = transform.forward;
 
             // Report shot fired to metrics
             PlayerMetricsTracker.Instance?.OnShotFired();
             PlayerMetricsTracker.Instance?.OnAmmoUsed();
 
-            // Perform hitscan raycast
-            bool hitSomething = Physics.Raycast(origin, direction, out RaycastHit hitInfo,
+            // Perform hitscan raycast starting from the player's core
+            bool hitSomething = Physics.Raycast(physicsOrigin, direction, out RaycastHit hitInfo,
                 range, hitLayers);
 
-            Vector3 endPoint = hitSomething ? hitInfo.point : origin + direction * range;
+            Vector3 endPoint = hitSomething ? hitInfo.point : visualOrigin + direction * range;
 
-            // Spawn tracer visual
+            // Spawn tracer visual starting from muzzle tip
             if (useTracers)
             {
-                ProjectileTracer.Spawn(origin, endPoint, tracerConfig);
+                ProjectileTracer.Spawn(visualOrigin, endPoint, tracerConfig);
             }
 
-            // Spawn muzzle flash
+            // Spawn muzzle flash at muzzle tip
             if (muzzleFlashPrefab != null)
             {
-                var flash = Instantiate(muzzleFlashPrefab, origin,
+                var flash = Instantiate(muzzleFlashPrefab, visualOrigin,
                     Quaternion.LookRotation(direction));
                 Destroy(flash, 0.5f);
             }
@@ -271,7 +274,7 @@ namespace Threshold.Player
             SyncAmmoHUD();
 
             // Fire event
-            OnShot?.Invoke(origin);
+            OnShot?.Invoke(visualOrigin);
 
             // Auto-reload on empty
             if (CurrentAmmo <= 0 && autoReload)

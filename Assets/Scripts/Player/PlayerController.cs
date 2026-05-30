@@ -136,15 +136,6 @@ namespace Threshold.Player
                 return;
             }
 
-            // Freeze movement while reloading (no walk+reload animation)
-            if (_weapon != null && _weapon.IsReloading)
-            {
-                _rb.linearVelocity = new Vector3(0f, _rb.linearVelocity.y, 0f);
-                _inputVelocity = Vector3.zero;
-                _smoothVelocity = Vector3.zero;
-                IsMoving = false;
-                return;
-            }
 
             HandleMovement();
             HandleRotation();
@@ -220,6 +211,13 @@ namespace Threshold.Player
                     if (dir.sqrMagnitude > 0.25f)
                         aimInput = dir.normalized;
                 }
+            }
+
+            // Ignore aim stick rotation during reload so that the player faces their movement direction
+            // and plays a clean forward walking animation instead of sliding sideways/backwards.
+            if (_weapon != null && _weapon.IsReloading)
+            {
+                aimInput = Vector3.zero;
             }
 
             IsAiming = aimInput.sqrMagnitude > 0.01f;
