@@ -1,5 +1,9 @@
 # THRESHOLD — Agentic AI Top-Down Shooter
 
+![THRESHOLD project thumbnail artwork showing a sci-fi character and robotic enemy](Assets/Images/Thumbnail%20Cropped.png)
+
+*Existing project thumbnail artwork; not a gameplay screenshot.*
+
 > **Google Antigravity Mobile Game Challenge 2026**  
 > *A procedurally generated dungeon crawler where every NPC thinks, every level is unique, and the game adapts to YOU.*
 
